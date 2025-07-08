@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     document.getElementById('settingsButton').addEventListener('click', () => {
-        browser.windows.create({ url: "settings.html", type: "popup", width: 400, height: 400 });
+        browser.windows.create({ url: "settings.html", type: "popup", width: 700, height: 400 });
     });
 
     document.getElementById('closeCaseFolderButton').addEventListener('click', () => {
