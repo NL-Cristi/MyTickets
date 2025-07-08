@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        .container {
+            padding: 20px;
+            text-align: center;
+        }
+
+        button {
+            padding: 10px;
+            width: 55px;
+        }
+
+        .folderCreateClass {
+            text-align: center;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        form {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+
+        input[type="text"] {
+            flex: 5;
+            padding: 10px;
+            box-sizing: border-box;
+            width: 100px;
+        }
+
+        input[type="submit"] {
+            padding: 5px 5px;
+            margin-left: 10px;
+            width: 5px;
+        }
+    </style>
+    <link rel="stylesheet" href="fontawesome/css/all.min.css">
+</head>
+
+<body>
+    <div class="container">
+        <button id="openCaseButton" hidden="true"><i class="fa-brands fa-chrome fa-flip-both fa-2xl"
+                style="color: #74C0FC;"></i></button>
+        <button id="getCaseIDButton" hidden="true" title="GetCaseID"><i
+                class="fa-solid fa-magnifying-glass fa-2xl"></i></button>
+        <button id="openTicketURLButton" title="OpenTicketURL"><i
+                class="fa-solid fa-up-right-from-square fa-2xl"></i></button>
+
+        <button id="create-folder-show-dialog" title="CreateCaseFolder">
+            <i class="fa-solid fa-folder-plus fa-flip-both fa-2xl" style="color: #087f24;"></i>
+        </button>
+        <button id="syncFolderButton" title="SyncFolder">
+            <i class="fa-solid fa-sink fa-2xl" style="color: #087f24;"></i>
+        </button>
+        <button id="closeCaseFolderButton" title="closeCaseFolder">
+            <i class="fa-solid fa-file-zipper fa-flip-both fa-2xl" style="color: #690508;"></i>
+        </button>
+        <button id="restoreArchiveButton" title="RestoreArchive"><i
+                class="fa-solid fa-window-restore fa-2xl"></i></button>
+        <button id="settingsButton" title="Settings">
+            <i class="fa-solid fa-gears fa-flip-vertical fa-2xl" style="color: #FFD43B;"></i>
+        </button>
+    </div>
+    <div class="folderCreateClass">
+        <dialog id="folder-dialog" class="dialog">
+            <form id="folder-form" method="dialog">
+                <label for="folder-input"></label>
+                <input type="text" id="folder-input" required="true" title="folderName" />
+                <button type="submit" id="save" title="save">
+                    <i class="fa-solid fa-floppy-disk fa-2xl" style="color: #087f24;"></i>
+                </button>
+                <button type="submit" id="cancel" title="cancel">
+                    <i class="fa-solid fa-square-xmark fa-flip-both fa-2xl" style="color: #690508;"> </i>
+                </button>
+            </form>
+        </dialog>
+        <output></output>
+    </div>
+    <script src="popup.js"></script>
+</body>
+
+</html>

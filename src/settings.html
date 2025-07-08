@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        span {
+            display: inline-block;
+            width: 95px;
+            font-weight: bold;
+            font-style: oblique;
+            font-family: 'sans-serif';
+        }
+
+        label {
+            width: 100px;
+            font-style: oblique;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .container {
+            padding: 10px;
+        }
+
+        .field {
+            margin-bottom: 10px;
+        }
+
+        input[type="text"],
+        select {
+            width: 95%;
+            /* Adjust the width to make it more narrow */
+            padding: 8px;
+            /* Consistent padding */
+            margin-bottom: 10px;
+        }
+
+        button {
+            padding: 10px;
+            margin: 5px;
+            width: 60px;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+    <link rel="stylesheet" href="fontawesome/css/all.min.css">
+</head>
+
+<body>
+    <div class="container">
+        <div id="currentValuesContainer" class="hidden">
+            <div id="currentTicketURLContainer" class="field">
+                <div> <label for="currentTicketURL">Ticket URL:</label>
+                </div>
+                <div> <span id="currentTicketURL"> TestURL</span>
+                </div>
+            </div>
+            <div id="currentOpenFoldersAutoSyncContainer" class="field">
+                <table>
+                    <tr>
+                        <td>
+                            <label for="currentOpenFoldersAutoSync">Open folders AutoSync:</label>
+                        </td>
+                        <td>
+                            <div></div>
+                        <td>
+                        <td>
+                            <span id="currentOpenFoldersAutoSync">True</span>
+                        </td>
+                    </tr>
+                </table>
+
+            </div>
+            <div id="currentAutoSyncTimeContainer" class="field">
+                <table>
+                    <tr>
+                        <td>
+                            <label for="currentAutoSyncTime">AutoSync time:</label>
+                        </td>
+                        <td>
+                            <div></div>
+                        <td>
+                        <td>
+                            <span id="currentAutoSyncTime">5</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <button id="resetButton"><i class="fa-regular fa-trash-can fa-2xl" style="color: #a31010;"></i></button>
+
+        </div>
+        <div id="formContainer">
+            <div class="field">
+                <label for="ticketURL">Ticket URL:</label>
+                <input type="text" id="ticketURL" name="ticketURL" placeholder="Ticket URL">
+            </div>
+            <div class="field">
+                <label for="openFoldersAutoSync">Open folders AutoSync:</label>
+                <select id="openFoldersAutoSync" name="openFoldersAutoSync">
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                </select>
+            </div>
+            <div class="field">
+                <label for="autoSyncTime">AutoSync time:</label>
+                <select id="autoSyncTime" name="autoSyncTime">
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                    <option value="30">30</option>
+                    <option value="60">60</option>
+                </select>
+            </div>
+            <div>
+                <button id="saveButton"><i class="fa-regular fa-floppy-disk fa-2xl"
+                        style="color: #63E6BE;"></i></button>
+                <button id="cancelButton"><i class="fa-regular fa-trash-can fa-2xl"
+                        style="color: #a31010;"></i></button>
+            </div>
+        </div>
+    </div>
+    <script src="settings.js"></script>
+</body>
+
+</html>

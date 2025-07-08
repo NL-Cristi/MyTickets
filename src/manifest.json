@@ -1,0 +1,41 @@
+{
+    "manifest_version": 2,
+    "name": "MyTickets",
+    "version": "1.1",
+    "description": "Extension to manage mails/cases from ZD",
+    "applications": {
+        "gecko": {
+            "id": "MyTickets@clamsen.com",
+            "strict_min_version": "115.0"
+        }
+    },
+    "permissions": [
+        "storage",
+        "tabs",
+        "activeTab",
+        "messagesRead",
+        "messagesMove",
+        "accountsRead",
+        "accountsFolders",
+        "messagesDelete",
+        "alarms"
+    ],
+    "background": {
+        "scripts": [
+            "background.js"
+        ]
+    },
+    "browser_action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon-16.png",
+            "48": "icons/icon-48.png",
+            "128": "icons/icon-128.png"
+        }
+    },
+    "icons": {
+        "16": "icons/icon-16.png",
+        "48": "icons/icon-48.png",
+        "128": "icons/icon-128.png"
+    }
+}
