@@ -1,757 +1,564 @@
-console.log("Background script loaded");
+import { logger } from './logger.js';
 
-populateDefaults();
+const LOG_CONTEXT = "background.js";
+logger.info(LOG_CONTEXT, "Script loaded");
+
+// Initial setup of the alarm based on stored settings
+setupAlarm();
 
 browser.browserAction.onClicked.addListener(() => {
-    console.log("Browser action clicked");
+    logger.debug(LOG_CONTEXT, "Browser action clicked, opening popup.");
     browser.browserAction.setPopup({ popup: "popup.html" });
 });
 
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log("Received message:", message);  // Log the received message
-    switch (message.action) {
-        case "openGoogle":
-            console.log("Opening Google");
+    const { action, ...params } = message;
+    logger.debug(LOG_CONTEXT, `Handling action: ${action}`, params);
+
+    const actions = {
+        openGoogle: () => {
             OpenGoogle();
-            sendResponse({ success: true });
-            break;
-        case "createCaseFolder":
-            createCaseFolder(message, sendResponse);
-            break;
-        case "closeCaseFolder":
-            archiveCaseFolder(sendResponse);
-            break;
-        case "syncFolderMails":
-            console.log("Syncing folder mails");
-            syncFolderMails(sendResponse);
-            break;
-        case "restoreArchivedFolder":
-            restoreArchivedFolder(sendResponse);
-            break;
-        case "openTicketURL":
-            console.log("Opening Ticket URL case");
-            OpenTicketURL().then(result => {
-                console.log("Ticket URL case opened:", result);
-                sendResponse(result);
-            }).catch(error => {
-                console.error("Error opening Ticket URL case:", error);
-                sendResponse({ success: false, message: error.message });
+            return Promise.resolve({ success: true });
+        },
+        createCaseFolder: () => createCaseFolder(params.folderPath),
+        checkFolderExists: () => checkFolderExists(params.folderPath),
+        syncAllFolders: () => SyncALLFolderMails(),
+        closeCaseFolder: () => archiveCaseFolder(),
+        syncFolderMails: () => syncFolderMails(),
+        restoreArchivedFolder: () => restoreArchivedFolder(),
+        openTicketURL: () => OpenTicketURL(),
+        getCaseID: () => ReturnTicketCaseID().then(caseID => ({ caseID })),
+    };
+
+    if (actions[action]) {
+        actions[action]()
+            .then(response => sendResponse(response))
+            .catch(error => {
+                logger.error(`${LOG_CONTEXT} -> ${action}`, "Error:", error);
+                sendResponse({ success: false, error: error.message });
             });
-            break;
-        case "getCaseID":
-            console.log("Getting case ID");
-            ReturnTicketCaseID().then(caseID => {
-                console.log("Case ID retrieved:", caseID);
-                sendResponse({ caseID: caseID });
-            }).catch(error => {
-                console.error("Error retrieving case ID:", error);
-                sendResponse({ caseID: null, error: error.message });
-            });
-            break;
-        default:
-            console.error("Unknown action: " + message.action);
+    } else {
+        logger.warn(LOG_CONTEXT, "Unknown action received:", action);
     }
-    // Indicate that the response will be sent asynchronously
-    return true;
+
+    return true; // Indicate that the response will be sent asynchronously
 });
 
 async function setupAlarm() {
+    const context = "setupAlarm";
     try {
-        const result = await browser.storage.local.get(['autoSyncTime', 'openFoldersAutoSync']);
-        const periodInMinutes = result.autoSyncTime || 5; // Default to 5 minutes if not set
-        const openFoldersAutoSync = result.openFoldersAutoSync;
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
 
-        console.log(`Setting up alarm with period: ${periodInMinutes} minutes, AutoSync: ${openFoldersAutoSync}`);
+        const periodInMinutes = parseInt(settings?.autoSyncTime || '5', 10);
+        const openFoldersAutoSync = settings?.openFoldersAutoSync === true || settings?.openFoldersAutoSync === 'true';
 
-        // Clear any existing alarms
+        logger.info(context, `Configuring alarm. Period: ${periodInMinutes} mins, AutoSync: ${openFoldersAutoSync}`);
+
         await browser.alarms.clearAll();
 
-        if (openFoldersAutoSync !== false) { // Set up alarm only if openFoldersAutoSync is not false
-            //convert periodInMinutes: periodInMinutes to int
-            periodInMinutesInt = parseInt(periodInMinutes);
-            browser.alarms.create("syncAlarm", { periodInMinutes: periodInMinutesInt });
-            console.log('Alarm set');
+        if (openFoldersAutoSync) {
+            browser.alarms.create("syncAlarm", { periodInMinutes: periodInMinutes });
+            logger.info(context, `Alarm 'syncAlarm' created with a ${periodInMinutes} minute period.`);
         } else {
-            console.log('Alarm not set, openFoldersAutoSync is false');
+            logger.info(context, 'AutoSync is disabled, alarm not created.');
         }
 
     } catch (error) {
-        console.error("Error setting up alarm: ", error);
+        logger.error(context, "Error setting up alarm:", error);
     }
 }
 
-// Set up the alarm when the background script loads
-setupAlarm();
-
 browser.alarms.onAlarm.addListener(async (alarm) => {
+    const context = "onAlarm";
     if (alarm.name === "syncAlarm") {
-        console.info("Alarm triggered: syncAlarm");
-        let currentTime = new Date().toLocaleTimeString();
-        console.log("Current time:", currentTime);
-        let tempFolders = await GetAllFolders();
-        console.log("FoldersCount:", tempFolders.length);
+        logger.info(context, `Alarm '${alarm.name}' triggered at ${new Date().toLocaleTimeString()}.`);
         await autoSyncOpenFolderMails();
     }
 });
 
 browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local' && (changes.autoSyncTime || changes.openFoldersAutoSync)) {
-        console.log("autoSyncTime or openFoldersAutoSync changed, updating alarm...");
+    const context = "storage.onChanged";
+    if (areaName === 'local' && changes['tickets-settings']) {
+        logger.info(context, "Settings have changed, re-evaluating alarms.");
         setupAlarm();
     }
 });
 
-
 async function OpenTicketURL() {
+    const context = "OpenTicketURL";
     try {
-        const data = await browser.storage.local.get('ticketURL');
-        if (!data.ticketURL) {
-            throw new Error("Ticket URL is not set.");
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
+        if (!settings || !settings.ticketURL) {
+            throw new Error("Ticket URL is not configured in settings.");
         }
         const subject = await getMessageSubject();
         if (!subject) {
-            throw new Error("No email subject found.");
+            throw new Error("Could not retrieve the subject from the selected email.");
         }
 
-        const ticketUrl = caseUrl(data.ticketURL, subject);
+        const ticketUrl = caseUrl(settings.ticketURL, subject);
         if (ticketUrl) {
-            console.log("Opening Ticket URL:", ticketUrl);
+            logger.info(context, `Opening URL: ${ticketUrl}`);
             browser.windows.openDefaultBrowser(ticketUrl);
             return { success: true };
         } else {
-            throw new Error("Ticket ID not found in subject.");
+            throw new Error("No ticket ID found in the email subject.");
         }
     } catch (error) {
-        console.log("Error: " + error.message);
-        return { success: false, message: error.message };
+        logger.error(context, "Failed to open ticket URL:", error);
+        throw error;
     }
 }
 
 async function ReturnTicketCaseID() {
+    const context = "ReturnTicketCaseID";
     try {
         const subject = await getMessageSubject();
         const caseID = extractTicketID(subject);
+        logger.info(context, `Extracted Case ID: ${caseID}`);
         return caseID;
     } catch (error) {
-        console.error("Error retrieving case ID: ", error);
-        throw error; // Re-throw the error to handle it in the background script
+        logger.error(context, "Failed to retrieve case ID:", error);
+        throw error;
     }
 }
 
 function extractTicketID(subject) {
-    const regex = /Ticket ID:\s*(\d+)/;
-    const match = subject.match(regex);
+    if (!subject) return null;
+    const match = subject.match(/Ticket ID:\s*(\d+)/);
     return match ? match[1] : null;
 }
 
 function OpenGoogle() {
-    console.log("Opening Google in default browser");
+    logger.info("OpenGoogle", "Opening google.com in the default browser.");
     browser.windows.openDefaultBrowser("https://google.com");
 }
 
 async function getMessageSubject() {
+    const context = "getMessageSubject";
     try {
         const mailTabs = await browser.mailTabs.query({ active: true, currentWindow: true });
-        if (mailTabs.length === 0) {
-            throw new Error("No active mail tab found.");
+        if (!mailTabs || mailTabs.length === 0) {
+            throw new Error("No active mail tab is open.");
         }
         const selectedMessages = await browser.mailTabs.getSelectedMessages(mailTabs[0].id);
         if (!selectedMessages || selectedMessages.messages.length === 0) {
-            throw new Error("No selected messages found.");
+            throw new Error("No message is currently selected.");
         }
         return selectedMessages.messages[0].subject;
     } catch (error) {
-        console.error("Error getting message subject: ", error);
+        logger.error(context, "Could not get message subject:", error);
         throw error;
     }
 }
 
 function caseUrl(ticketURL, subject) {
-    const ticketId = extractTicketID(subject);
-    return ticketId ? `https://${ticketURL}${ticketId}` : null;
-}
-
-async function populateDefaults() {
-    let myImapAccount;
-    let monitorFolder;
-    let openedSyncFolder = [];
-    let closedSyncFolder = [];
-
-    try {
-        let myAccounts = await browser.accounts.list();
-
-        // Find the IMAP account AND id = account1 at the same time
-        myImapAccount = myAccounts.filter(account => account.type === "imap" && account.id === "account1");
-
-        // Error out if no IMAP account is found
-        if (myImapAccount.length === 0) {
-            console.error("No IMAP account found");
-            return;
-        } else {
-            await browser.storage.local.set({ myImapAccount: myImapAccount });
-            console.info("IMAP account1 found");
-        }
-
-        // Find the "MyFolders" folder
-        for (let account of myImapAccount) {
-            for (let folder of account.folders) {
-                if (folder.name === "MyFolders") {
-                    monitorFolder = folder;
-                    await browser.storage.local.set({ monitorFolder: monitorFolder });
-                    console.info("MyFolders FOUND");
-                    break;
-                }
-            }
-            if (monitorFolder) break;
-        }
-
-        if (!monitorFolder) {
-            console.error("MyFolders not found");
-            return;
-        }
-
-        try {
-            // Get subfolders of monitorFolder
-            let monitorOpenClosedFolders = await browser.folders.getSubFolders(monitorFolder);
-
-            // Check if the array contains an object with the name "Open"
-            let containsOpen = monitorOpenClosedFolders.some(folder => folder.name === "Open");
-
-            // Check if the array contains an object with the name "Closed"
-            let containsClosed = monitorOpenClosedFolders.some(folder => folder.name === "Closed");
-
-            if (containsOpen && containsClosed) {
-                console.log("The array contains objects with the names 'Open' and 'Closed'.");
-                openedSyncFolder = monitorOpenClosedFolders.filter(folder => folder.name === 'Open');
-                closedSyncFolder = monitorOpenClosedFolders.filter(folder => folder.name === 'Closed');
-                await browser.storage.local.set({ openedSyncFolder: openedSyncFolder, closedSyncFolder: closedSyncFolder });
-            } else {
-                if (!containsOpen) {
-                    // Create the "Open" folder
-                    let newOpenFolder = await browser.folders.create(monitorFolder, "Open");
-                    openedSyncFolder.push(newOpenFolder);
-                    await browser.storage.local.set({ openedSyncFolder: openedSyncFolder });
-                    console.log("New subfolder 'Open' created:", newOpenFolder);
-                }
-
-                if (!containsClosed) {
-                    // Create the "Closed" folder
-                    let newClosedFolder = await browser.folders.create(monitorFolder, "Closed");
-                    closedSyncFolder.push(newClosedFolder);
-                    await browser.storage.local.set({ closedSyncFolder: closedSyncFolder });
-                    console.log("New subfolder 'Closed' created:", newClosedFolder);
-                }
-
-                console.log("The array contains objects with the names 'Open' and 'Closed'.");
-            }
-
-        } catch (error) {
-            console.error("Error processing subfolders or creating new folder:", error);
-        }
-
-    } catch (error) {
-        console.error("Error in populateDefaults: ", error);
+    const caseID = extractTicketID(subject);
+    if (caseID) {
+        return `${ticketURL}${caseID}`;
     }
+    return null;
 }
-
-// Example usage of populateDefaults
-populateDefaults();
-
-
-async function PopulateOpenClosedFolders() {
-    try {
-        const result = await browser.storage.local.get(['monitorFolder', 'openedSyncFolder', 'closedSyncFolder']);
-        const monitorFolder = result.monitorFolder;
-        let openedSyncFolder = result.openedSyncFolder || [];
-        let closedSyncFolder = result.closedSyncFolder || [];
-
-        if (!monitorFolder) {
-            console.error("Monitor folder not found in storage");
-            return;
-        }
-
-        // Get subfolders of monitorFolder
-        let monitorOpenClosedFolders = await browser.folders.getSubFolders(monitorFolder);
-
-        // Update the storage with the latest subfolder information
-        openedSyncFolder = monitorOpenClosedFolders.filter(folder => folder.name === 'Open');
-        closedSyncFolder = monitorOpenClosedFolders.filter(folder => folder.name === 'Closed');
-
-        await browser.storage.local.set({ openedSyncFolder: openedSyncFolder, closedSyncFolder: closedSyncFolder });
-
-        console.info("Open and Closed subfolders updated in storage");
-
-    } catch (error) {
-        console.error("Error in PopulateOpenClosedFolders: ", error);
-    }
-}
-
 
 async function GetAllFolders() {
+    const context = "GetAllFolders";
     try {
-        // Retrieve all accounts
-        const accounts = await browser.accounts.list();
+        const accounts = await browser.accounts.list(true);
+        const allFolders = [];
 
-        // Function to recursively get all folders
-        const getFoldersRecursive = async (folders, flatList) => {
-            for (let folder of folders) {
-                flatList.push(folder);
-                if (folder.subFolders && folder.subFolders.length > 0) {
-                    await getFoldersRecursive(folder.subFolders, flatList);
+        function flatten(folder) {
+            allFolders.push(folder);
+            if (folder.subFolders) {
+                for (const subFolder of folder.subFolders) {
+                    flatten(subFolder);
                 }
             }
-        };
-
-        // Array to hold all folders
-        let allFolders = [];
-
-        // Iterate through each account and get all folders
-        for (let account of accounts) {
-            let rootFolders = account.folders;
-            await getFoldersRecursive(rootFolders, allFolders);
         }
-        allFolders = allFolders.filter(folder => !folder.path.includes("MyFolder"));
 
+        for (const account of accounts) {
+            if (account.folders) {
+                for (const folder of account.folders) {
+                    flatten(folder);
+                }
+            }
+        }
         return allFolders;
     } catch (error) {
-        console.error("Error retrieving folders:", error);
+        logger.error(context, "Error retrieving folders:", error);
         return [];
     }
 }
 
-async function GetTicketFolder() {
+async function checkFolderExists(folderPath) {
+    const context = "checkFolderExists";
     try {
-        // Retrieve all accounts
-        const accounts = await browser.accounts.list();
-
-        // Function to recursively get all folders
-        const getFoldersRecursive = async (folders, flatList) => {
-            for (let folder of folders) {
-                flatList.push(folder);
-                if (folder.subFolders && folder.subFolders.length > 0) {
-                    await getFoldersRecursive(folder.subFolders, flatList);
-                }
-            }
-        };
-
-        // Array to hold all folders
-        let allFolders = [];
-
-        // Iterate through each account and get all folders
-        for (let account of accounts) {
-            let rootFolders = account.folders;
-            await getFoldersRecursive(rootFolders, allFolders);
+        if (!folderPath) {
+            return { exists: false, folder: null };
         }
-        allFolders = allFolders.filter(folder => folder.path.includes("Tickets"));
+        const allFolders = await GetAllFolders();
+        const sanitizedPath = folderPath.trim().replace(/^\/+|\/+$/g, '');
+        logger.debug(context, `Checking for sanitized path: '${sanitizedPath}'`);
 
-        return allFolders;
-    } catch (error) {
-        console.error("Error retrieving folders:", error);
-        return [];
-    }
-}
+        // First, try a direct match (full path with account)
+        const directMatch = allFolders.find(f => f.path.trim().replace(/^\/+|\/+$/g, '') === sanitizedPath);
+        if (directMatch) {
+            logger.debug(context, `Found exact folder match for '${sanitizedPath}'`);
+            return { exists: true, folder: directMatch };
+        }
+        
+        // If no direct match, try to find a folder where the path ENDS with the provided path.
+        logger.debug(context, "No exact match found. Checking for suffix match...");
+        const possibleFolders = allFolders.filter(f => f.path.endsWith('/' + sanitizedPath) || f.path === sanitizedPath);
 
-async function getTicketFoldersInfo() {
-    try {
-        // Retrieve all accounts
-        const accounts = await browser.accounts.list();
-
-        // Function to recursively get all folders
-        const getFoldersRecursive = async (folders, flatList) => {
-            for (let folder of folders) {
-                flatList.push(folder);
-                if (folder.subFolders && folder.subFolders.length > 0) {
-                    await getFoldersRecursive(folder.subFolders, flatList);
-                }
+        if (possibleFolders.length >= 1) {
+            const found = possibleFolders[0];
+            if (possibleFolders.length > 1) {
+                logger.warn(context, `Found multiple folders for ambiguous setting '${sanitizedPath}'. Using the first one found: '${found.path}' in account '${found.accountId}'. Please update settings to include the account name for correctness.`);
             }
-        };
-
-        // Array to hold all folders
-        let allFolders = [];
-
-        // Iterate through each account and get all folders
-        for (let account of accounts) {
-            let rootFolders = account.folders;
-            await getFoldersRecursive(rootFolders, allFolders);
+            logger.debug(context, `Found suffix match for '${sanitizedPath}'. Path: '${found.path}'`);
+            return { exists: true, folder: found };
         }
 
-        // Filter folders that contain "Tickets" in their name or path
-        const ticketFolders = allFolders.filter(folder =>
-            folder.name.includes("Tickets") || folder.path.includes("Tickets")
-        );
-
-        // Get detailed info for each ticket folder
-
-        return ticketFolders[0];
+        logger.debug(context, `No folder found for '${sanitizedPath}'.`);
+        return { exists: false, folder: null };
     } catch (error) {
-        console.error("Error retrieving ticket folders info:", error);
-        return [];
+        logger.error(context, `Error checking folder path "${folderPath}":`, error);
+        return { exists: false, folder: null };
     }
 }
 
-async function GetAllOpenTicketIDFolders() {
-    try {
-        // Function to recursively get all subfolders
-        const getSubFoldersRecursive = async (folders, flatList) => {
-            for (let folder of folders) {
-                flatList.push(folder);
-                if (folder.subFolders && folder.subFolders.length > 0) {
-                    await getSubFoldersRecursive(folder.subFolders, flatList);
-                }
-            }
-        };
-        const result = await browser.storage.local.get('openedSyncFolder');
-        const openedSyncFolder = result.openedSyncFolder[0];
-
-        // Retrieve all subfolders of the openedSyncFolder
-        let rootFolders = await browser.folders.getSubFolders(openedSyncFolder);
-
-        // Array to hold all folders
-        let allFolders = [];
-
-        // Get all folders recursively
-        await getSubFoldersRecursive(rootFolders, allFolders);
-
-        return allFolders;
-    } catch (error) {
-        console.error("Error retrieving open ticket ID folders:", error);
-        return [];
+async function createCaseFolder(folderPath) {
+    const context = "createCaseFolder";
+    
+    if (!folderPath) {
+        throw new Error("Folder path not provided.");
     }
-}
 
-async function getAllOpenTicketID() {
-    try {
-        // Retrieve all open ticket ID folders
-        const allFolders = await GetAllOpenTicketIDFolders();
-
-        // Create an array that only contains the name value from each folder object
-        const folderNames = allFolders.map(folder => folder.name);
-
-        return folderNames;
-    } catch (error) {
-        console.error("Error retrieving open ticket ID folder names:", error);
-        return [];
+    let checkResult = await checkFolderExists(folderPath);
+    if (checkResult.exists) {
+        logger.info(context, `Folder "${folderPath}" already exists.`);
+        return { success: true, folder: checkResult.folder };
     }
-}
 
-async function getAllOpenTicketSubjects() {
-    try {
-        // Retrieve all open ticket ID folders
-        const allFolders = await GetAllOpenTicketIDFolders();
+    const defaultAccount = await browser.accounts.getDefault();
+    logger.info(context, `Folder does not exist. Creating "${folderPath}" in default account "${defaultAccount.name}".`);
 
-        // Create an array that only contains the extracted ticket ID value from each folder name
-        const ticketIDs = allFolders.map(folder => {
-            // Extract the numerical part (ticket ID) using a regular expression
-            const match = folder.name.match(/(\d+)/);
-            // Return the formatted ticket ID if a match is found
-            return match ? `Ticket ID: ${match[1]}` : null;
-        }).filter(ticketID => ticketID !== null); // Filter out any null values
+    const pathParts = folderPath.trim().replace(/^\/+|\/+$/g, '').split('/');
+    
+    let parentObject = defaultAccount;
+    let searchFolders = defaultAccount.folders;
+    let targetFolder = null;
 
-        return ticketIDs;
-    } catch (error) {
-        console.error("Error retrieving open ticket ID folder names:", error);
-        return [];
-    }
-}
+    for (const part of pathParts) {
+        let foundFolder = searchFolders.find(f => f.name === part);
 
-async function* getMessages(folder) {
-    let page = await browser.messages.list(folder);
-    yield* page.messages;
-
-    while (page.id) {
-        page = await browser.messages.continueList(page.id);
-        yield* page.messages;
-    }
-}
-
-async function getAllTicketIDMessages(allFolders, ticketID) {
-    const matchingMessages = [];
-
-    await Promise.all(allFolders.map(async (folder) => {
-        const messages = getMessages(folder);
-        for await (let message of messages) {
-            let fullMessage = await browser.messages.get(message.id);
-            if (fullMessage.subject && fullMessage.subject.includes(ticketID)) {
-                console.log("Full message:", fullMessage);
-                matchingMessages.push(fullMessage);
-            }
+        if (!foundFolder) {
+            logger.info(context, `Creating folder part: "${part}" in parent: "${parentObject.name}"`);
+            foundFolder = await browser.folders.create(parentObject, part);
         }
-    }));
-    console.log("GOT matching messages:", matchingMessages);
-    return matchingMessages;
+        
+        targetFolder = foundFolder;
+        parentObject = foundFolder;
+        searchFolders = await browser.folders.getSubFolders(parentObject);
+    }
+
+    logger.info(context, `Full folder path created successfully: "${targetFolder.path}" in account "${defaultAccount.name}"`);
+    return { success: true, folder: targetFolder };
 }
-async function createCaseFolder(message, sendResponse) {
-    console.log("Received createCaseFolder message in background:", message);
-    if (message.folderName) {
-        try {
-            const caseID = await ReturnTicketCaseID();
-            console.log("Case ID retrieved:", caseID);
-            console.log("Folder name:", message.folderName);
 
-            // Retrieve openedSyncFolder from storage
-            const result = await browser.storage.local.get('openedSyncFolder');
-            const openedSyncFolder = result.openedSyncFolder[0];
+async function archiveCaseFolder() {
+    const context = "archiveCaseFolder";
+    logger.info(context, "Archive process started.");
+    try {
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
+        if (!settings || !settings.openedFolder || !settings.closedFolder) {
+            throw new Error("Opened/Closed folder paths are not configured in settings.");
+        }
 
-            if (!openedSyncFolder) {
-                console.error("Open sync folder not found in storage");
-                sendResponse({ success: false, error: "Open sync folder not found in storage" });
-                return;
+        const { folder: openFolder } = await checkFolderExists(settings.openedFolder);
+        if (!openFolder) {
+            throw new Error(`The source "Opened" folder "${settings.openedFolder}" does not exist.`);
+        }
+
+        const { folder: closedFolderDestination } = await checkFolderExists(settings.closedFolder);
+        if (!closedFolderDestination) {
+            throw new Error(`The destination archive folder "${settings.closedFolder}" does not exist.`);
+        }
+
+        const mailTabs = await browser.mailTabs.query({ active: true, currentWindow: true });
+        const currentFolder = mailTabs[0]?.displayedFolder;
+        if (!currentFolder) {
+            throw new Error("No folder is currently selected/displayed.");
+        }
+
+        const sourceFolderName = currentFolder.name;
+        if (currentFolder.path.startsWith(openFolder.path)) {
+            logger.info(context, `Archiving folder "${sourceFolderName}" from "${openFolder.path}" to "${closedFolderDestination.path}".`);
+            try {
+                await messenger.folders.move(currentFolder.id, closedFolderDestination.id);
+            } catch (moveError) {
+                logger.warn(context, `A non-critical error occurred during the move operation. Verifying...`, moveError);
             }
 
-            // Add your folder creation logic here using caseID and folderName
-            const combinedFolderName = `${caseID} - ${message.folderName}`;
-            let openFolderSubfolders = await browser.folders.getSubFolders(openedSyncFolder);
+            const newFolderPath = `${closedFolderDestination.path}/${sourceFolderName}`;
+            const { exists: moveSucceeded } = await checkFolderExists(newFolderPath);
 
-            if (openFolderSubfolders.some(folder => folder.name === combinedFolderName)) {
-                console.error("Folder already exists:", combinedFolderName);
-                sendResponse({ success: false, error: "Folder already exists." });
+            if (moveSucceeded) {
+                logger.info(context, `Verification successful: Folder "${sourceFolderName}" moved to "${closedFolderDestination.path}".`);
+                return { success: true, folderName: sourceFolderName };
             } else {
-                console.log("Creating folder:", combinedFolderName);
-                let newMonitorFolder = await browser.folders.create(openedSyncFolder, combinedFolderName);
-                console.info("New folder created:", newMonitorFolder);
-                sendResponse({ success: true, folderName: combinedFolderName });
+                throw new Error(`Verification failed: Could not find folder in "${closedFolderDestination.path}" after move.`);
+            }
+        } else {
+            throw new Error(`Current folder "${sourceFolderName}" is not in the configured "Opened" directory.`);
+        }
+    } catch (error) {
+        logger.error(context, "Error archiving case folder:", error);
+        throw error;
+    }
+}
+
+async function restoreArchivedFolder() {
+    const context = "restoreArchivedFolder";
+    logger.info(context, "Restore process started.");
+    try {
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
+        if (!settings || !settings.openedFolder || !settings.closedFolder) {
+            throw new Error("Opened/Closed folder paths are not configured in settings.");
+        }
+
+        const { folder: openFolderDestination } = await checkFolderExists(settings.openedFolder);
+        if (!openFolderDestination) {
+            throw new Error(`The destination "Opened" folder "${settings.openedFolder}" does not exist.`);
+        }
+
+        const { folder: closedFolder } = await checkFolderExists(settings.closedFolder);
+        if (!closedFolder) {
+            throw new Error(`The source "Closed" folder "${settings.closedFolder}" does not exist.`);
+        }
+
+        const mailTabs = await browser.mailTabs.query({ active: true, currentWindow: true });
+        const currentFolder = mailTabs[0]?.displayedFolder;
+        if (!currentFolder) {
+            throw new Error("No folder is currently selected/displayed.");
+        }
+
+        const sourceFolderName = currentFolder.name;
+        if (currentFolder.path.startsWith(closedFolder.path)) {
+            logger.info(context, `Restoring folder "${sourceFolderName}" from "${closedFolder.path}" to "${openFolderDestination.path}".`);
+            try {
+                await messenger.folders.move(currentFolder.id, openFolderDestination.id);
+            } catch (moveError) {
+                logger.warn(context, `A non-critical error occurred during the restore operation. Verifying...`, moveError);
+            }
+
+            const newFolderPath = `${openFolderDestination.path}/${sourceFolderName}`;
+            const { exists: moveSucceeded } = await checkFolderExists(newFolderPath);
+
+            if (moveSucceeded) {
+                logger.info(context, `Verification successful: Folder "${sourceFolderName}" restored to "${openFolderDestination.path}".`);
+                return { success: true, folderName: sourceFolderName };
+            } else {
+                throw new Error(`Verification failed: Could not find folder in "${openFolderDestination.path}" after restore.`);
+            }
+        } else {
+            throw new Error(`Current folder "${sourceFolderName}" is not in the configured "Closed" directory.`);
+        }
+    }
+    catch (error) {
+        logger.error(context, "Error restoring archived folder:", error);
+        throw error;
+    }
+}
+
+async function findAndMoveMessages(subjectToSearch, targetFolder, foldersToSearch) {
+    const context = "findAndMoveMessages";
+    let movedCount = 0;
+    logger.debug(context, `Searching for ticket ID "${subjectToSearch}" in ${foldersToSearch.length} folder(s).`);
+
+    for (const folder of foldersToSearch) {
+        try {
+            logger.debug(context, `Scanning folder: "${folder.path}"`);
+            const messagesToMove = [];
+            
+            let page = await browser.messages.list(folder.id);
+            while (page.messages.length > 0) {
+                logger.debug(context, `Found ${page.messages.length} message(s) on this page in "${folder.path}".`);
+
+                for (const message of page.messages) {
+                    //logger.debug(context, `Checking subject: "${message.subject}"`);
+                    if (message.subject && message.subject.includes(subjectToSearch)) {
+                        messagesToMove.push(message.id);
+                        logger.debug(context, `MATCH FOUND for ID "${subjectToSearch}" in subject: "${message.subject}"`);
+                    }
+                }
+
+                if (!page.id) {
+                    break; // No more pages
+                }
+                page = await browser.messages.continueList(page.id);
+            }
+
+            if (messagesToMove.length > 0) {
+                logger.debug(context, `Moving ${messagesToMove.length} message(s) for ticket "${subjectToSearch}" from "${folder.path}" to "${targetFolder.path}".`);
+                await browser.messages.move(messagesToMove, targetFolder.id);
+                movedCount += messagesToMove.length;
+            } else {
+                logger.debug(context, `No matching messages found in "${folder.path}".`);
             }
         } catch (error) {
-            console.error("Error processing folder creation:", error);
-            sendResponse({ success: false, error: error.message });
+            logger.warn(context, `Could not process folder "${folder.path}". It might be a special or inaccessible folder.`, error);
         }
-    } else {
-        console.error("No folder name provided.");
-        sendResponse({ success: false, error: "No folder name provided." });
     }
-    console.log("LogAfter createCaseFolder in background");
+    return movedCount;
 }
 
-
-async function archiveCaseFolder(sendResponse) {
-    console.log("LOG at the beginning of archiveCaseFolder in background");
-
-    try {
-        // Get the current selected tab and its displayed folder
-        const currentSelectedTab = await messenger.mailTabs.getCurrent();
-        const currentFolder = currentSelectedTab.displayedFolder;
-        console.info("CurrentTab", currentSelectedTab);
-        console.info("currentFolder", currentFolder);
-
-        // Retrieve openedSyncFolder and closedSyncFolder from storage
-        const result = await browser.storage.local.get(['openedSyncFolder', 'closedSyncFolder']);
-        const openedSyncFolder = result.openedSyncFolder[0];
-        const closedSyncFolder = result.closedSyncFolder[0];
-
-        if (!openedSyncFolder || !closedSyncFolder) {
-            console.error("Open or Closed sync folders not found in storage");
-            sendResponse({ success: false, error: "Open or Closed sync folders not found in storage" });
-            return;
-        }
-
-        // Get subfolders of open and closed folders
-        const openFolderSubFolders = await messenger.folders.getSubFolders(openedSyncFolder);
-        const closedFolderSubFolders = await messenger.folders.getSubFolders(closedSyncFolder);
-
-        if (openFolderSubFolders.some(folder => folder.name === currentFolder.name)) {
-            console.info("Folder exists in Open:", currentFolder.name);
-            try {
-                // Copy folder to closed folder
-                const newMonitorFolder = await messenger.folders.copy(currentFolder, closedSyncFolder);
-
-                try {
-                    // Attempt to delete the original folder
-                    await messenger.folders.delete(currentFolder);
-                    console.info("Folder copied to Closed is:", currentFolder.name);
-                    console.info("Moved Folder is:", newMonitorFolder);
-                    sendResponse({ success: true, folderName: newMonitorFolder.name });
-                } catch (deleteError) {
-                    // Handle delete error specifically
-                    console.error('Error deleting folder:', deleteError);
-                    sendResponse({ success: true, folderName: newMonitorFolder.name });
-                }
-
-            } catch (copyError) {
-                console.error('Error copying folder:', copyError);
-                var errorMessage = copyError.message.split('because ')[1];
-                sendResponse({ success: false, error: errorMessage });
-            }
-        } else if (closedFolderSubFolders.some(folder => folder.name === currentFolder.name)) {
-            console.info("Folder is already in Closed:", currentFolder.name);
-            sendResponse({ success: false, error: "Folder is already in CLOSED." });
-        } else {
-            console.error("Folder does not exist in Open:", currentFolder.name);
-            sendResponse({ success: false, error: "Folder does not exist in Open." });
-        }
-    } catch (error) {
-        console.error('Error in archiveCaseFolder:', error);
-        sendResponse({ success: false, error: `Unexpected error: ${error.message}` });
-    }
-
-    console.log("LOG at the end of archiveCaseFolder in background");
-}
-async function restoreArchivedFolder(sendResponse) {
-    console.log("LOG at the beginning of reOpenArchivedCase in background");
+async function syncFolderMails() {
+    const context = "syncFolderMails";
+    logger.info(context, "Pausing auto-sync alarm during manual sync.");
+    await browser.alarms.clear("syncAlarm");
 
     try {
-        // Get the current selected tab and its displayed folder
-        const currentSelectedTab = await messenger.mailTabs.getCurrent();
-        const currentFolder = currentSelectedTab.displayedFolder;
-        console.info("CurrentTab", currentSelectedTab);
-        console.info("currentFolder", currentFolder);
-
-        // Retrieve openedSyncFolder and closedSyncFolder from storage
-        const result = await browser.storage.local.get(['openedSyncFolder', 'closedSyncFolder']);
-        const openedSyncFolder = result.openedSyncFolder[0];
-        const closedSyncFolder = result.closedSyncFolder[0];
-
-        if (!openedSyncFolder || !closedSyncFolder) {
-            console.error("Open or Closed sync folders not found in storage");
-            sendResponse({ success: false, error: "Open or Closed sync folders not found in storage" });
-            return;
+        const mailTabs = await browser.mailTabs.query({ active: true, currentWindow: true });
+        const currentFolder = mailTabs[0]?.displayedFolder;
+        if (!currentFolder) {
+            throw new Error("No folder is currently selected.");
         }
 
-        // Get subfolders of open and closed folders
-        const openFolderSubFolders = await messenger.folders.getSubFolders(openedSyncFolder);
-        const closedFolderSubFolders = await messenger.folders.getSubFolders(closedSyncFolder);
-
-        if (closedFolderSubFolders.some(folder => folder.name === currentFolder.name)) {
-            console.info("Folder exists in Closed:", currentFolder.name);
-            try {
-                // Copy folder to open folder
-                const newMonitorFolder = await messenger.folders.copy(currentFolder, openedSyncFolder);
-
-                try {
-                    // Attempt to delete the original folder
-                    await messenger.folders.delete(currentFolder);
-                    console.info("Folder copied to Open is:", currentFolder.name);
-                    console.info("Moved Folder is:", newMonitorFolder);
-                    sendResponse({ success: true, folderName: newMonitorFolder.name });
-                } catch (deleteError) {
-                    // Handle delete error specifically
-                    console.error('Error deleting folder:', deleteError);
-                    sendResponse({ success: true, folderName: newMonitorFolder.name });
-                }
-
-            } catch (copyError) {
-                console.error('Error copying folder:', copyError);
-                var errorMessage = copyError.message.split('because ')[1];
-                sendResponse({ success: false, error: errorMessage });
-            }
-        } else if (openFolderSubFolders.some(folder => folder.name === currentFolder.name)) {
-            console.info("Folder is already in Open:", currentFolder.name);
-            sendResponse({ success: false, error: "Folder is already in OPEN." });
-        } else {
-            console.error("Folder does not exist in Closed:", currentFolder.name);
-            sendResponse({ success: false, error: "Folder does not exist in Closed." });
-        }
-    } catch (error) {
-        console.error('Error in reOpenArchivedCase:', error);
-        sendResponse({ success: false, error: `Unexpected error: ${error.message}` });
-    }
-
-    console.log("LOG at the end of reOpenArchivedCase in background");
-}
-async function syncFolderMails(sendResponse) {
-    try {
-        console.info("Syncing folder mails");
-        const currentSelectedTab = await messenger.mailTabs.getCurrent();
-        const currentFolder = currentSelectedTab.displayedFolder;
-        console.info("currentFolderName is ", currentFolder.name);
-        const match = currentFolder.name.match(/(\d+)/);
-
-        // Ensure match is found to avoid undefined errors
+        const match = currentFolder.name.match(/(\d{5,})/);
         if (!match) {
-            console.error("No ticket ID found in folder name");
-            sendResponse({ success: false, error: "No ticket ID found in folder name" });
+            throw new Error("The selected folder does not appear to be a ticket folder (no ID in name).");
+        }
+        const subjectToSearch = match[1];
+
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
+        const syncFolderPaths = (settings?.syncFolders || 'INBOX').split(/[,;]/).map(p => p.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
+
+        logger.info(context, `Syncing mails for ticket "${subjectToSearch}" into folder "${currentFolder.path}".`);
+        logger.info(context, `Searching in paths: ${syncFolderPaths.join(', ')}.`);
+
+        const allFolders = await GetAllFolders();
+        const foldersToSearch = allFolders.filter(folder => 
+            syncFolderPaths.some(searchPath => folder.path.endsWith('/' + searchPath) || folder.path === searchPath)
+        );
+
+        const movedCount = await findAndMoveMessages(subjectToSearch, currentFolder, foldersToSearch);
+
+        logger.info(context, `Sync complete. Moved ${movedCount} messages for ticket "${subjectToSearch}".`);
+        return { success: true, messagesCount: movedCount };
+    } catch (error) {
+        logger.error(context, "Error during mail sync:", error);
+        throw error;
+    } finally {
+        logger.info(context, "Re-evaluating and re-enabling auto-sync alarm.");
+        await setupAlarm();
+    }
+}
+
+async function SyncALLFolderMails() {
+    const context = "SyncALLFolderMails";
+    let totalMovedCount = 0;
+    
+    logger.info(context, "Pausing auto-sync alarm during manual sync.");
+    await browser.alarms.clear("syncAlarm");
+
+    try {
+        logger.info(context, "Starting sync for ALL ticket folders.");
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
+        if (!settings || !settings.openedFolder || !settings.closedFolder) {
+            throw new Error("Opened and/or Closed folders are not configured in settings.");
+        }
+
+        const { folder: openFolderParent } = await checkFolderExists(settings.openedFolder);
+        const { folder: closedFolderParent } = await checkFolderExists(settings.closedFolder);
+
+        const openSubfolders = openFolderParent ? await browser.folders.getSubFolders(openFolderParent) : [];
+        const closedSubfolders = closedFolderParent ? await browser.folders.getSubFolders(closedFolderParent) : [];
+        const allTicketFolders = [...openSubfolders, ...closedSubfolders];
+
+        if (allTicketFolders.length === 0) {
+            logger.info(context, "No ticket folders found to sync.");
+            return { success: true, messagesCount: 0 };
+        }
+
+        logger.info(context, `Found ${allTicketFolders.length} ticket folders to process.`);
+
+        const syncFolderPaths = (settings?.syncFolders || 'INBOX').split(/[,;]/).map(p => p.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
+        logger.info(context, `Searching for messages in paths: ${syncFolderPaths.join(', ')}.`);
+
+        const allSystemFolders = await GetAllFolders();
+        const foldersToSearch = allSystemFolders.filter(folder => 
+            syncFolderPaths.some(searchPath => folder.path.endsWith('/' + searchPath) || folder.path === searchPath)
+        );
+
+        for (const ticketFolder of allTicketFolders) {
+            const match = ticketFolder.name.match(/(\d{5,})/);
+            if (!match) continue;
+
+            const subjectToSearch = match[1];
+            logger.debug(context, `Processing folder: ${ticketFolder.path} for ticket ID ${subjectToSearch}`);
+            const movedCount = await findAndMoveMessages(subjectToSearch, ticketFolder, foldersToSearch);
+
+            if (movedCount > 0) {
+                logger.info(context, `Moved ${movedCount} messages for ticket "${subjectToSearch}" to folder "${ticketFolder.name}".`);
+                totalMovedCount += movedCount;
+            }
+        }
+        logger.info(context, `Finished sync for ALL folders. Total messages moved: ${totalMovedCount}.`);
+        return { success: true, messagesCount: totalMovedCount };
+
+    } catch (error) {
+        logger.error(context, "Error during 'Sync All' operation:", error);
+        throw error;
+    } finally {
+        logger.info(context, "Re-evaluating and re-enabling auto-sync alarm.");
+        await setupAlarm();
+    }
+}
+
+async function autoSyncOpenFolderMails() {
+    const context = "autoSyncOpenFolderMails";
+    try {
+        logger.info(context, "Auto-sync process started.");
+        const { 'tickets-settings': settings } = await browser.storage.local.get('tickets-settings');
+        if (!settings || !settings.openedFolder) {
+            logger.info(context, "Auto-sync skipped: 'Opened' folder path is not configured.");
             return;
         }
 
-        // Return the formatted ticket ID if a match is found
-        const subjectToSearch = `Ticket ID: ${match[1]}`;
-        console.info("subjectToSearch is:", subjectToSearch);
-        console.info("currentFolder", currentFolder.name);
-
-        const allFolders = await GetAllFolders();
-        const allFilteredFolders = allFolders.filter(folder => !folder.path.includes("MyFolder"));
-        const allWantedFolders = allFolders.filter(folder => folder.type === 'sent' || folder.type === 'inbox' || folder.name === 'Tickets' || folder.name === 'MyFolders' || folder.name === 'VSOS');
-
-        // Initialize myMessages as an empty array
-        let myMessages = [];
-
-        for (const folder of allWantedFolders) {
-            console.info("FolderName is:", folder.name);
-
-            let page = await messenger.messages.list(folder);
-            let filteredMessages = page.messages.filter(message => message.subject.includes(subjectToSearch));
-
-            // Add the messages from the first page
-            myMessages = myMessages.concat(filteredMessages);
-
-            // Continue retrieving messages if there are more pages
-            while (page.id) {
-                page = await messenger.messages.continueList(page.id);
-                filteredMessages = page.messages.filter(message => message.subject.includes(subjectToSearch));
-                myMessages = myMessages.concat(filteredMessages);
-            }
+        const { folder: openFolderParent } = await checkFolderExists(settings.openedFolder);
+        if (!openFolderParent) {
+            logger.info(context, `Auto-sync skipped: Configured 'Opened' folder "${settings.openedFolder}" does not exist.`);
+            return;
         }
-        let messageIDS = myMessages.map(message => message.id);
-        let move = await browser.messages.move(messageIDS, currentFolder);
-        console.info("Messages moved:", move);
-        console.info("messagesFound:", myMessages.length);
-        console.info("messageIDS Count:", messageIDS.length);
-        console.info("end of For each loop");
 
-        sendResponse({ success: true, messagesCount: messageIDS.length });
-    } catch (error) {
-        console.error('Error in syncFolderMails:', error);
-        sendResponse({ success: false, error: `Unexpected error: ${error.message}` });
-    }
-}
-async function autoSyncOpenFolderMails() {
-    try {
-        console.info("autoSyncOpenFolderMails folders mails");
+        const openSubfolders = await browser.folders.getSubFolders(openFolderParent);
+        if (openSubfolders.length === 0) {
+            logger.info(context, "No subfolders found in the 'Opened' directory to sync.");
+            return;
+        }
 
-        const allFolders = await GetAllFolders();
-        await PopulateOpenClosedFolders();
+        const syncFolderPaths = (settings?.syncFolders || 'INBOX').split(/[,;]/).map(p => p.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
+        logger.info(context, `Auto-syncing ${openSubfolders.length} folder(s). Searching in paths: ${syncFolderPaths.join(', ')}.`);
 
-        var openSubfolders = await GetAllOpenTicketIDFolders();
-        const allWantedFolders = allFolders.filter(folder => folder.type === 'sent' || folder.type === 'inbox' || folder.name === 'Tickets' || folder.name === 'MyFolders' || folder.name === 'VSOS');
+        const allSystemFolders = await GetAllFolders();
+        const foldersToSearch = allSystemFolders.filter(folder => 
+            syncFolderPaths.some(searchPath => folder.path.endsWith('/' + searchPath) || folder.path === searchPath)
+        );
 
         for (const openFolder of openSubfolders) {
-            console.info("Start of OpenFolder ForEAch loop");
-            console.info("openFolder is:", openFolder.name);
+            const match = openFolder.name.match(/(\d{5,})/);
+            if (!match) continue;
 
-            // Extract the numerical part (ticket ID) using a regular expression
-            const match = openFolder.name.match(/(\d+)/);
-            const subjectToSearch = `Ticket ID: ${match[1]}`;
-            console.info(subjectToSearch);
-            let myMessages = [];
+            const subjectToSearch = match[1];
+            const movedCount = await findAndMoveMessages(subjectToSearch, openFolder, foldersToSearch);
 
-            for (const wantedFolder of allWantedFolders) {
-                console.info("Start of wantedFolder ForEAch loop");
-
-                console.info("wantedFolder is:", wantedFolder.name);
-
-                let page = await messenger.messages.list(wantedFolder);
-                console.info("finding " + subjectToSearch + " in " + wantedFolder.name + " folder");
-                let filteredMessages = page.messages.filter(message => message.subject.includes(subjectToSearch));
-
-                // Add the messages from the first page
-                myMessages = myMessages.concat(filteredMessages);
-
-                // Continue retrieving messages if there are more pages
-                while (page.id) {
-                    page = await messenger.messages.continueList(page.id);
-                    filteredMessages = page.messages.filter(message => message.subject.includes(subjectToSearch));
-                    myMessages = myMessages.concat(filteredMessages);
-                }
-                console.info("ENd of wantedFolder ForEAch loop");
-
+            if (movedCount > 0) {
+                logger.info(context, `Moved ${movedCount} messages for ticket "${subjectToSearch}" to folder "${openFolder.name}".`);
             }
-            let messageIDS = myMessages.map(message => message.id);
-            let move = await browser.messages.move(messageIDS, openFolder);
-            console.info(messageIDS.length + " Messages moved for " + subjectToSearch + " to " + openFolder.name);
-            console.info("ENd of openFolder ForEAch loop");
         }
-
-        console.info("after all tickets");
+        logger.info(context, "Auto-sync process finished.");
     } catch (error) {
-        console.error('Error in syncFolderMails:', error);
+        logger.error(context, "Error during auto-sync:", error);
     }
 }

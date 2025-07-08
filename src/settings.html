@@ -9,7 +9,7 @@
 
         span {
             display: inline-block;
-            width: 95px;
+            width: auto;
             font-weight: bold;
             font-style: oblique;
             font-family: 'sans-serif';
@@ -55,16 +55,25 @@
     <div class="container">
         <div id="currentValuesContainer" class="hidden">
             <div id="currentTicketURLContainer" class="field">
-                <div> <label for="currentTicketURL">Ticket URL:</label>
-                </div>
-                <div> <span id="currentTicketURL"> TestURL</span>
-                </div>
+                <table>
+                    <tr>
+                        <td>
+                            <label for="currentTicketURL">Ticket URL:</label>
+                        </td>
+                        <td>
+                            <div></div>
+                        <td>
+                        <td>
+                            <span id="currentTicketURL"> TestURL</span>
+                        </td>
+                    </tr>
+                </table>
             </div>
             <div id="currentOpenFoldersAutoSyncContainer" class="field">
                 <table>
                     <tr>
                         <td>
-                            <label for="currentOpenFoldersAutoSync">Open folders AutoSync:</label>
+                            <label for="currentOpenFoldersAutoSync">AutoSync:</label>
                         </td>
                         <td>
                             <div></div>
@@ -80,24 +89,79 @@
                 <table>
                     <tr>
                         <td>
-                            <label for="currentAutoSyncTime">AutoSync time:</label>
+                            <label for="currentAutoSyncTime">Auto-Sync Interval:</label>
                         </td>
                         <td>
                             <div></div>
                         <td>
                         <td>
-                            <span id="currentAutoSyncTime">5</span>
+                            <span id="currentAutoSyncTime"></span> minutes
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div id="currentOpenedFolderContainer" class="field">
+                <table>
+                    <tr>
+                        <td><label for="currentOpenedFolder">Opened Folder:</label></td>
+                        <td><span id="currentOpenedFolder"></span></td>
+                        <td><button id="createOpenedFolder" class="hidden">Create</button></td>
+                        <td><span id="openedFolderOK" class="hidden">OK</span></td>
+                    </tr>
+                </table>
+            </div>
+            <div id="currentClosedFolderContainer" class="field">
+                <table>
+                    <tr>
+                        <td><label for="currentClosedFolder">Closed Folder:</label></td>
+                        <td><span id="currentClosedFolder"></span></td>
+                        <td><button id="createClosedFolder" class="hidden">Create</button></td>
+                        <td><span id="closedFolderOK" class="hidden">OK</span></td>
+                    </tr>
+                </table>
+            </div>
+            <div id="currentSyncFoldersContainer" class="field">
+                <table>
+                    <tr>
+                        <td><label for="currentSyncFolders">Sync Folders:</label></td>
+                        <td><span id="currentSyncFolders"></span></td>
+                    </tr>
+                </table>
+            </div>
+            <div id="currentDebugModeContainer" class="field">
+                <table>
+                    <tr>
+                        <td>
+                            <label for="currentDebugMode">Debug Mode:</label>
+                        </td>
+                        <td>
+                            <div></div>
+                        <td>
+                        <td>
+                            <span id="currentDebugMode"></span>
                         </td>
                     </tr>
                 </table>
             </div>
             <button id="resetButton"><i class="fa-regular fa-trash-can fa-2xl" style="color: #a31010;"></i></button>
-
+            <button id="editButton"><i class="fa-regular fa-pen-to-square fa-2xl" style="color: #1a10a3;"></i></button>
         </div>
-        <div id="formContainer">
+        <div id="formContainer" class="container hidden">
             <div class="field">
                 <label for="ticketURL">Ticket URL:</label>
                 <input type="text" id="ticketURL" name="ticketURL" placeholder="Ticket URL">
+            </div>
+            <div class="field">
+                <label for="openedFolder">Opened Folder:</label>
+                <input type="text" id="openedFolder" name="openedFolder" placeholder="e.g., Opened or Path/To/Opened">
+            </div>
+            <div class="field">
+                <label for="closedFolder">Closed Folder:</label>
+                <input type="text" id="closedFolder" name="closedFolder" placeholder="e.g., Closed or Path/To/Closed">
+            </div>
+            <div class="field">
+                <label for="syncFolders">Sync Folders:</label>
+                <input type="text" id="syncFolders" name="syncFolders" placeholder="e.g., Tickets,VSOS,Other">
             </div>
             <div class="field">
                 <label for="openFoldersAutoSync">Open folders AutoSync:</label>
@@ -107,13 +171,21 @@
                 </select>
             </div>
             <div class="field">
-                <label for="autoSyncTime">AutoSync time:</label>
-                <select id="autoSyncTime" name="autoSyncTime">
+                <label for="autoSyncTime">Auto-Sync Interval:</label>
+                <select id="autoSyncTime">
                     <option value="5">5</option>
                     <option value="10">10</option>
                     <option value="15">15</option>
                     <option value="30">30</option>
                     <option value="60">60</option>
+                </select>
+                minutes
+            </div>
+            <div class="form-item">
+                <label for="debugMode">Debug Mode:</label>
+                <select id="debugMode">
+                    <option value="true">Enabled</option>
+                    <option value="false" selected>Disabled</option>
                 </select>
             </div>
             <div>
@@ -124,7 +196,7 @@
             </div>
         </div>
     </div>
-    <script src="settings.js"></script>
+    <script type="module" src="settings.js"></script>
 </body>
 
 </html>

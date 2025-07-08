@@ -52,23 +52,22 @@
 
 <body>
     <div class="container">
-        <button id="openCaseButton" hidden="true"><i class="fa-brands fa-chrome fa-flip-both fa-2xl"
-                style="color: #74C0FC;"></i></button>
-        <button id="getCaseIDButton" hidden="true" title="GetCaseID"><i
-                class="fa-solid fa-magnifying-glass fa-2xl"></i></button>
-        <button id="openTicketURLButton" title="OpenTicketURL"><i
+        <button id="openTicketURLButton" title="OpenTicketURL" hidden><i
                 class="fa-solid fa-up-right-from-square fa-2xl"></i></button>
 
-        <button id="create-folder-show-dialog" title="CreateCaseFolder">
+        <button id="create-folder-show-dialog" title="CreateCaseFolder" hidden>
             <i class="fa-solid fa-folder-plus fa-flip-both fa-2xl" style="color: #087f24;"></i>
         </button>
-        <button id="syncFolderButton" title="SyncFolder">
+        <button id="syncFolderButton" title="SyncFolder" hidden>
             <i class="fa-solid fa-sink fa-2xl" style="color: #087f24;"></i>
         </button>
-        <button id="closeCaseFolderButton" title="closeCaseFolder">
+        <button id="syncAllFoldersButton" title="Sync All Folders" hidden>
+            <i class="fa-solid fa-arrows-rotate fa-2xl" style="color: #087f24;"></i>
+        </button>
+        <button id="closeCaseFolderButton" title="closeCaseFolder" hidden>
             <i class="fa-solid fa-file-zipper fa-flip-both fa-2xl" style="color: #690508;"></i>
         </button>
-        <button id="restoreArchiveButton" title="RestoreArchive"><i
+        <button id="restoreArchiveButton" title="RestoreArchive" hidden><i
                 class="fa-solid fa-window-restore fa-2xl"></i></button>
         <button id="settingsButton" title="Settings">
             <i class="fa-solid fa-gears fa-flip-vertical fa-2xl" style="color: #FFD43B;"></i>
@@ -89,7 +88,7 @@
         </dialog>
         <output></output>
     </div>
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
 </body>
 
 </html>

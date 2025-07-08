@@ -1,157 +1,120 @@
-console.log("PopUp script loaded");  // Log when the popup script is loaded
+import { logger } from './logger.js';
 
-// Hide the openTicketURLButton if ticketURL is not present in local storage
-browser.storage.local.get('ticketURL').then(data => {
-    if (!data.ticketURL) {
-        document.getElementById('openTicketURLButton').style.display = 'none';
-    }
-}).catch(error => {
-    console.error("Error accessing storage: ", error);
-});
+const LOG_CONTEXT = "popup.js";
+logger.info(LOG_CONTEXT, "Script loaded");
 
-// Open settings popup
-document.getElementById('settingsButton').addEventListener('click', function () {
-    browser.windows.create({
-        url: "settings.html",
-        type: "popup",
-        width: 400,
-        height: 400
-    });
-});
+function getAllSettings() {
+    return browser.storage.local.get('tickets-settings');
+}
 
-// Listen for the message from the popup
-window.addEventListener('message', function (event) {
-    if (event.data.action === "createCaseFolder") {
-        console.log("Folder name received:", event.data.folderName);
-        // You can add further processing of the folder name here
-        // For example, creating the folder in the background script
-    }
-});
-
-document.getElementById('openCaseButton').addEventListener('click', function () {
-    var folderName = window.prompt("Enter the name of the case folder:");
-    if (folderName !== null && folderName.trim() !== "") {
-        browser.runtime.sendMessage({ action: "openGoogle", folderName: folderName.trim() });
-    } else {
-        console.log("User did not provide a valid case folder name.");
-    }
-});
-
-document.getElementById('closeCaseFolderButton').addEventListener('click', function () {
-    browser.runtime.sendMessage({ action: "closeCaseFolder" }, (response) => {
-        if (browser.runtime.lastError) {
-            console.error("Error retrieving case ID: ", browser.runtime.lastError);
-            return;
-        }
+async function sendMessageWithFeedback(action, params = {}, successMessage) {
+    const context = `sendMessage -> ${action}`;
+    try {
+        const response = await browser.runtime.sendMessage({ action, ...params });
         if (response.error) {
-            console.error("Error: ", response.error);
-            window.alert(response.error);
-
-        } else {
-            console.info(response.folderName + " archived successfully");
-            window.alert(response.folderName + " archived successfully");
+            throw new Error(response.error);
         }
+        logger.info(context, "Success:", response);
+        if (successMessage) {
+            window.alert(successMessage(response));
+        }
+        return response;
+    } catch (error) {
+        logger.error(context, "Error:", error);
+        window.alert(error.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    // Show/hide buttons based on whether settings are configured
+    getAllSettings().then(data => {
+        const settings = data['tickets-settings'];
+        if (settings && Object.values(settings).some(setting => setting)) {
+            document.getElementById('openTicketURLButton').hidden = false;
+            document.getElementById('create-folder-show-dialog').hidden = false;
+            document.getElementById('syncFolderButton').hidden = false;
+            document.getElementById('syncAllFoldersButton').hidden = false;
+            document.getElementById('closeCaseFolderButton').hidden = false;
+            document.getElementById('restoreArchiveButton').hidden = false;
+        }
+    }).catch(error => {
+        logger.error(LOG_CONTEXT, "Error accessing storage: ", error);
     });
-});
 
-document.getElementById('syncFolderButton').addEventListener('click', function () {
-    browser.runtime.sendMessage({ action: "syncFolderMails" }, (response) => {
-        if (browser.runtime.lastError) {
-            console.error("Error retrieving case ID: ", browser.runtime.lastError);
-            return;
-        }
-        if (response.error) {
-            console.error("Error: ", response.error);
-            window.alert(response.error);
-
-        } else {
-            console.info("Moved " + response.messagesCount + " mails to the folder");
-            window.alert("Moved " + response.messagesCount + " mails to the folder");
-        }
+    document.getElementById('settingsButton').addEventListener('click', () => {
+        browser.windows.create({ url: "settings.html", type: "popup", width: 400, height: 400 });
     });
-});
 
-document.getElementById('getCaseIDButton').addEventListener('click', function () {
-    browser.runtime.sendMessage({ action: "getCaseID" }, (response) => {
-        if (browser.runtime.lastError) {
-            console.error("Error retrieving case ID: ", browser.runtime.lastError);
-            return;
-        }
-        if (response.error) {
-            console.error("Error: ", response.error);
-            window.alert("Error retrieving case ID: " + response.error);
-
-        } else {
-            console.log("Case ID: ", response.caseID);
-            window.alert("Case ID: " + response.caseID);
-        }
+    document.getElementById('closeCaseFolderButton').addEventListener('click', () => {
+        sendMessageWithFeedback('closeCaseFolder', {}, res => `${res.folderName} archived successfully.`);
     });
-});
 
-document.getElementById('openTicketURLButton').addEventListener('click', function () {
-    browser.storage.local.get('ticketURL').then(data => {
-        if (!data.ticketURL) {
+    document.getElementById('syncFolderButton').addEventListener('click', () => {
+        sendMessageWithFeedback('syncFolderMails', {}, res => `Moved ${res.messagesCount} mail(s) to the folder.`);
+    });
+
+    document.getElementById('syncAllFoldersButton').addEventListener('click', () => {
+        sendMessageWithFeedback('syncAllFolders', {}, res => `Synced ${res.messagesCount} mail(s) across all folders.`);
+    });
+
+    document.getElementById('openTicketURLButton').addEventListener('click', async () => {
+        const settingsData = await getAllSettings();
+        const settings = settingsData['tickets-settings'];
+        if (!settings || !settings.ticketURL) {
             window.alert("Ticket URL is not set. Please set it in the settings.");
             return;
         }
-
-        browser.runtime.sendMessage({ action: "openTicketURL" }, (response) => {
-            if (browser.runtime.lastError) {
-                console.error("Error opening case: ", browser.runtime.lastError);
-                return;
-            }
-            if (response.error) {
-                console.error("Error: ", response.error);
-                window.alert("Error opening case: " + response.error);
-            } else {
-                console.log("Case opened successfully");
-            }
-        });
-    }).catch(error => {
-        console.error("Error accessing storage: ", error);
-        window.alert("Error accessing storage: " + error.message);
+        sendMessageWithFeedback('openTicketURL');
     });
-});
 
-document.getElementById('restoreArchiveButton').addEventListener('click', function () {
-    browser.runtime.sendMessage({ action: "restoreArchivedFolder" }, (response) => {
-        if (browser.runtime.lastError) {
-            console.error("Error retrieving case ID: ", browser.runtime.lastError);
+    document.getElementById('restoreArchiveButton').addEventListener('click', () => {
+        sendMessageWithFeedback('restoreArchivedFolder', {}, res => `${res.folderName} restored successfully.`);
+    });
+
+    // Dialog handling for creating a new case folder
+    const showBtn = document.getElementById("create-folder-show-dialog");
+    const dialog = document.getElementById("folder-dialog");
+    const saveBtn = dialog.querySelector("#save");
+    const cancelBtn = dialog.querySelector("#cancel");
+    const folderInput = document.getElementById("folder-input");
+
+    showBtn.addEventListener("click", () => dialog.showModal());
+    cancelBtn.addEventListener("click", () => dialog.close());
+
+    saveBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const newFolderName = folderInput.value.trim();
+        if (!newFolderName) {
+            dialog.close();
             return;
         }
-        if (response.error) {
-            console.error("Error: ", response.error);
-            window.alert(response.error);
 
-        } else {
-            console.info(response.folderName + " reOpened successfully");
-            window.alert(response.folderName + " reOpened successfully");
+        try {
+            const settingsData = await getAllSettings();
+            const settings = settingsData['tickets-settings'];
+            if (!settings || !settings.openedFolder) {
+                throw new Error("Opened folder path not configured in settings.");
+            }
+
+            const { caseID } = await browser.runtime.sendMessage({ action: "getCaseID" });
+            
+            let finalFolderName = newFolderName;
+            if (caseID) {
+                finalFolderName = `${caseID} - ${newFolderName}`;
+            } else {
+                logger.warn(LOG_CONTEXT, "Could not get Ticket ID from subject. Creating folder without it.");
+                window.alert("Could not get Ticket ID from subject. Creating folder without it.");
+            }
+
+            const folderPath = `${settings.openedFolder}/${finalFolderName}`;
+            await sendMessageWithFeedback('createCaseFolder', { folderPath }, () => `Folder "${finalFolderName}" created successfully.`);
+        
+        } catch(error) {
+            logger.error(LOG_CONTEXT, "Error creating folder:", error);
+            window.alert("Error creating folder: " + error.message);
+        } finally {
+            dialog.close();
+            folderInput.value = ''; // Reset input
         }
     });
-});
-
-const showBtn = document.getElementById("create-folder-show-dialog");
-const dialog = document.getElementById("folder-dialog");
-const jsSaveBtn = dialog.querySelector("#save");
-const jsCancelBtn = dialog.querySelector("#cancel");
-
-const form = document.getElementById("folder-form");
-const folderInput = document.getElementById("folder-input");
-const cancelBtn = document.getElementById("cancel");
-
-showBtn.addEventListener("click", () => {
-    dialog.showModal();
-});
-
-jsSaveBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    console.log(folderInput.value);
-    browser.runtime.sendMessage({ action: "createCaseFolder", folderName: folderInput.value });
-    dialog.close();
-});
-jsCancelBtn.addEventListener("click", (e) => {
-    dialog.close();
-});
-cancelBtn.addEventListener("click", () => {
-    dialog.close();
 });
